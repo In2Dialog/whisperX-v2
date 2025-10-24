@@ -289,15 +289,33 @@ class FasterWhisperPipeline(Pipeline):
     def detect_language(self, audio: np.ndarray) -> str:
         if audio.shape[0] < N_SAMPLES:
             logger.warning("Audio is shorter than 30s, language detection may be inaccurate")
+            # Use entire audio if shorter than 30 seconds
+            start_idx = 0
+            segment_audio = audio[: N_SAMPLES]
+        else:
+            # Use middle 30 seconds of the recording
+            audio_duration_samples = audio.shape[0]
+            middle_point = audio_duration_samples // 2
+            start_idx = max(0, middle_point - (N_SAMPLES // 2))
+            end_idx = min(audio_duration_samples, start_idx + N_SAMPLES)
+            segment_audio = audio[start_idx:end_idx]
+
         model_n_mels = self.model.feat_kwargs.get("feature_size")
-        segment = log_mel_spectrogram(audio[: N_SAMPLES],
+        segment = log_mel_spectrogram(segment_audio,
                                       n_mels=model_n_mels if model_n_mels is not None else 80,
-                                      padding=0 if audio.shape[0] >= N_SAMPLES else N_SAMPLES - audio.shape[0])
+                                      padding=0 if segment_audio.shape[0] >= N_SAMPLES else N_SAMPLES - segment_audio.shape[0])
         encoder_output = self.model.encode(segment)
         results = self.model.model.detect_language(encoder_output)
         language_token, language_probability = results[0][0]
         language = language_token[2:-2]
-        logger.info(f"Detected language: {language} ({language_probability:.2f}) in first 30s of audio")
+
+        if audio.shape[0] < N_SAMPLES:
+            logger.info(f"Detected language: {language} ({language_probability:.2f}) using full audio (shorter than 30s)")
+        else:
+            start_time = start_idx / SAMPLE_RATE
+            end_time = (start_idx + N_SAMPLES) / SAMPLE_RATE
+            logger.info(f"Detected language: {language} ({language_probability:.2f}) using audio segment from {start_time:.1f}s to {end_time:.1f}s")
+
         return language
 
 
